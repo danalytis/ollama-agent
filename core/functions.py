@@ -385,7 +385,241 @@ def execute_shell_command(arguments: Dict, verbose: bool = False) -> Tuple[str, 
     except Exception as e:
         error_msg = f"❌ Error executing command '{command}': {str(e)}"
         return error_msg, error_msg
+def execute_get_file_content_smart(arguments: Dict, verbose: bool = False) -> Tuple[str, str]:
+    """Read file content with smart limiting for large files"""
+    file_path = arguments.get("file_path")
+    max_chars = arguments.get("max_chars", 3000)  # Adjustable limit
+    context_lines = arguments.get("context_lines", 5)  # Lines around target
+    target_line = arguments.get("target_line", None)  # Focus on specific line
 
+    if not file_path:
+        error_msg = "❌ Error: file_path parameter required"
+        return error_msg, error_msg
+
+    if verbose:
+        rich_print(f"  📖 Smart reading file: {file_path}", style="dim")
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        total_chars = len(content)
+        lines = content.split('\n')
+        total_lines = len(lines)
+
+        # If file is small enough, return everything
+        if total_chars <= max_chars:
+            ai_result = f"Content of '{file_path}' ({total_chars} chars, {total_lines} lines):\n{content}"
+            language = get_file_language(file_path)
+            user_result = f"📄 {file_path} ({language}, {total_chars} chars):{content}"
+            return ai_result, user_result
+
+        # File is large - use smart strategies
+        if target_line:
+            # Focus on specific line with context
+            start_line = max(1, target_line - context_lines)
+            end_line = min(total_lines, target_line + context_lines)
+
+            selected_lines = lines[start_line-1:end_line]
+            smart_content = '\n'.join(selected_lines)
+
+            ai_result = f"Content around line {target_line} in '{file_path}' (lines {start_line}-{end_line} of {total_lines}):\n{smart_content}\n\n[Note: This is a focused excerpt. Use read_file_lines for other sections.]"
+
+        else:
+            # Show beginning and end with summary
+            head_lines = 20
+            tail_lines = 10
+
+            head_content = '\n'.join(lines[:head_lines])
+            tail_content = '\n'.join(lines[-tail_lines:])
+
+            ai_result = f"""Content of '{file_path}' (LARGE FILE - {total_chars} chars, {total_lines} lines):
+
+[BEGINNING - Lines 1-{head_lines}]
+{head_content}
+
+[... {total_lines - head_lines - tail_lines} lines omitted ...]
+
+[END - Lines {total_lines - tail_lines + 1}-{total_lines}]
+{tail_content}
+
+[Note: Use read_file_lines or target_line parameter to see specific sections.]"""
+
+        language = get_file_language(file_path)
+        user_result = f"📄 {file_path} ({language}, {total_chars} chars - EXCERPT SHOWN)"
+
+        return ai_result, user_result
+
+    except FileNotFoundError:
+        error_msg = f"❌ Error: File '{file_path}' not found"
+        return error_msg, error_msg
+    except Exception as e:
+        error_msg = f"❌ Error reading '{file_path}': {str(e)}"
+        return error_msg, error_msg
+
+
+def execute_find_in_file(arguments: Dict, verbose: bool = False) -> Tuple[str, str]:
+    """Find text patterns in a file and show context"""
+    file_path = arguments.get("file_path")
+    search_text = arguments.get("search_text", "")
+    context_lines = arguments.get("context_lines", 3)
+    max_matches = arguments.get("max_matches", 10)
+
+    if not file_path or not search_text:
+        error_msg = "❌ Error: file_path and search_text parameters required"
+        return error_msg, error_msg
+
+    if verbose:
+        rich_print(f"  🔍 Searching for '{search_text}' in: {file_path}", style="dim")
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        matches = []
+        for line_num, line in enumerate(lines, 1):
+            if search_text.lower() in line.lower():
+                # Get context around the match
+                start_context = max(0, line_num - context_lines - 1)
+                end_context = min(len(lines), line_num + context_lines)
+
+                context_block = []
+                for i in range(start_context, end_context):
+                    prefix = ">>> " if i == line_num - 1 else "    "
+                    context_block.append(f"{prefix}{i+1:3d}: {lines[i].rstrip()}")
+
+                matches.append({
+                    'line_num': line_num,
+                    'context': '\n'.join(context_block)
+                })
+
+                if len(matches) >= max_matches:
+                    break
+
+        if matches:
+            result_parts = [f"Found {len(matches)} matches for '{search_text}' in '{file_path}':\n"]
+            for i, match in enumerate(matches, 1):
+                result_parts.append(f"Match {i} (line {match['line_num']}):")
+                result_parts.append(match['context'])
+                result_parts.append("")  # Empty line separator
+
+            ai_result = '\n'.join(result_parts)
+            user_result = f"🔍 Found {len(matches)} matches in {file_path}"
+        else:
+            ai_result = f"No matches found for '{search_text}' in '{file_path}'"
+            user_result = f"🔍 No matches found for '{search_text}'"
+
+        return ai_result, user_result
+
+    except Exception as e:
+        error_msg = f"❌ Error searching '{file_path}': {str(e)}"
+        return error_msg, error_msg
+def execute_read_file_lines(arguments: Dict, verbose: bool = False) -> Tuple[str, str]:
+    """Read specific lines from a file"""
+    file_path = arguments.get("file_path")
+    start_line = arguments.get("start_line", 1)
+    end_line = arguments.get("end_line", None)
+
+    if not file_path:
+        error_msg = "❌ Error: file_path parameter required"
+        return error_msg, error_msg
+
+    if verbose:
+        rich_print(f"  📖 Reading lines {start_line}-{end_line or 'end'} from: {file_path}", style="dim")
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        total_lines = len(lines)
+
+        # Adjust line numbers (1-based to 0-based)
+        start_idx = max(0, start_line - 1)
+        end_idx = min(total_lines, end_line) if end_line else total_lines
+
+        selected_lines = lines[start_idx:end_idx]
+        content = ''.join(selected_lines)
+
+        ai_result = f"Lines {start_line}-{end_idx} of '{file_path}' (total: {total_lines} lines):\n{content}"
+        user_result = f"📄 {file_path} [lines {start_line}-{end_idx}]:{content}"
+
+        return ai_result, user_result
+
+    except FileNotFoundError:
+        error_msg = f"❌ Error: File '{file_path}' not found"
+        return error_msg, error_msg
+    except Exception as e:
+        error_msg = f"❌ Error reading '{file_path}': {str(e)}"
+        return error_msg, error_msg
+
+
+def execute_write_file_lines(arguments: Dict, verbose: bool = False) -> Tuple[str, str]:
+    """Replace specific lines in a file"""
+    file_path = arguments.get("file_path")
+    content = arguments.get("content", "")
+    start_line = arguments.get("start_line", 1)
+    end_line = arguments.get("end_line", None)
+
+    if not file_path:
+        error_msg = "❌ Error: file_path parameter required"
+        return error_msg, error_msg
+
+    if verbose:
+        rich_print(f"  ✍️  Replacing lines {start_line}-{end_line or 'end'} in: {file_path}", style="dim")
+
+    try:
+        # Read existing file
+        with open(file_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        # Convert to 0-based indexing
+        start_idx = max(0, start_line - 1)
+        end_idx = min(len(lines), end_line) if end_line else len(lines)
+
+        # Split new content into lines
+        new_lines = content.split('\n')
+        if new_lines and not new_lines[-1].endswith('\n'):
+            new_lines = [line + '\n' for line in new_lines[:-1]] + [new_lines[-1]]
+        else:
+            new_lines = [line + '\n' for line in new_lines if line]
+
+        # Replace the specified lines
+        updated_lines = lines[:start_idx] + new_lines + lines[end_idx:]
+
+        # Write back to file
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.writelines(updated_lines)
+
+        result = f"✅ Successfully replaced lines {start_line}-{end_idx} in '{file_path}'"
+        return result, result
+
+    except Exception as e:
+        error_msg = f"❌ Error updating '{file_path}': {str(e)}"
+        return error_msg, error_msg
+
+
+def execute_append_to_file(arguments: Dict, verbose: bool = False) -> Tuple[str, str]:
+    """Append content to end of file"""
+    file_path = arguments.get("file_path")
+    content = arguments.get("content", "")
+
+    if not file_path:
+        error_msg = "❌ Error: file_path parameter required"
+        return error_msg, error_msg
+
+    if verbose:
+        rich_print(f"  ➕ Appending to file: {file_path}", style="dim")
+
+    try:
+        with open(file_path, "a", encoding="utf-8") as f:
+            f.write(content)
+
+        result = f"✅ Successfully appended {len(content)} characters to '{file_path}'"
+        return result, result
+
+    except Exception as e:
+        error_msg = f"❌ Error appending to '{file_path}': {str(e)}"
+        return error_msg, error_msg
 
 # Function registry
 FUNCTION_HANDLERS = {
@@ -394,6 +628,12 @@ FUNCTION_HANDLERS = {
     "write_file": execute_write_file,
     "run_python_file": execute_run_python_file,
     "shell_command": execute_shell_command,
+
+    "get_file_content_smart": execute_get_file_content_smart,
+    "read_file_lines": execute_read_file_lines,
+    "write_file_lines": execute_write_file_lines,
+    "append_to_file": execute_append_to_file,
+    "find_in_file": execute_find_in_file,
 }
 
 
@@ -427,3 +667,4 @@ def execute_function(
     except Exception as e:
         error_msg = f"❌ Error executing {function_name}: {str(e)}"
         return error_msg, error_msg, None
+

@@ -72,6 +72,21 @@ Use shell commands as your first choice for file/directory operations, then use 
         else:
             system_content = base_prompt
 
+        large_file_instructions = """
+LARGE FILE HANDLING:
+For files that might be large or when you need targeted operations, you have these additional functions:
+
+- get_file_content_smart: Read with size limits. Params: {"file_path": "path", "target_line": 17, "context_lines": 5}
+- read_file_lines: Read specific lines. Params: {"file_path": "path", "start_line": 10, "end_line": 20}
+- write_file_lines: Replace specific lines. Params: {"file_path": "path", "content": "code", "start_line": 17, "end_line": 17}
+- find_in_file: Search for text. Params: {"file_path": "path", "search_text": "error"}
+
+SMART STRATEGY:
+- If asked to "fix line X", use get_file_content_smart with target_line: X, then write_file_lines
+- If file operations fail due to size, automatically switch to these targeted functions
+- Use write_file_lines instead of write_file for small changes to avoid JSON truncation"""
+
+        system_content += large_file_instructions
         self.conversation_manager.initialize_conversation(system_content)
 
     def call_ollama_api(self, messages: List[Dict]) -> Dict:
@@ -97,23 +112,67 @@ Use shell commands as your first choice for file/directory operations, then use 
         """Parse function call from model response"""
         text = text.strip()
 
-        # Look for JSON function call pattern
-        start_idx = text.find("{")
-        end_idx = text.rfind("}") + 1
+        # Find the start of JSON
+        start_idx = text.find('{"function_call"')
+        if start_idx == -1:
+            start_idx = text.find('{')
+            if start_idx == -1:
+                return None
 
-        if start_idx == -1 or end_idx == 0:
+        # Find the end by counting braces properly
+        brace_count = 0
+        end_idx = -1
+
+        for i in range(start_idx, len(text)):
+            char = text[i]
+            if char == '{':
+                brace_count += 1
+            elif char == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    end_idx = i + 1
+                    break
+
+        if end_idx == -1:
+            if self.config.verbose:
+                rich_print("❌ Could not find complete JSON object", style="red")
             return None
 
+        json_str = text[start_idx:end_idx]
+
+        if self.config.verbose:
+            rich_print(f"🔍 Parsing JSON: {json_str}", style="dim")
+
         try:
-            json_str = text[start_idx:end_idx]
             parsed = json.loads(json_str)
 
-            if "function_call" in parsed:
-                return parsed["function_call"]
-        except json.JSONDecodeError:
-            pass
+            if "function_call" in parsed and isinstance(parsed["function_call"], dict):
+                function_call = parsed["function_call"]
 
-        return None
+                # Ensure required fields exist
+                if "name" not in function_call:
+                    if self.config.verbose:
+                        rich_print("❌ Missing 'name' in function_call", style="red")
+                    return None
+
+                if "arguments" not in function_call:
+                    function_call["arguments"] = {}
+
+                if self.config.verbose:
+                    rich_print(f"✅ Successfully parsed function: {function_call['name']}", style="green")
+
+                return function_call
+
+            if self.config.verbose:
+                rich_print("❌ No valid function_call found in JSON", style="red")
+            return None
+
+        except json.JSONDecodeError as e:
+            if self.config.verbose:
+                rich_print(f"❌ JSON parse error: {e}", style="red")
+                rich_print(f"   JSON string was: {repr(json_str)}", style="dim")
+            return None
+
 
     def should_show_function_result(self, func_name: str, user_prompt: str) -> bool:
         """Determine if function result should be shown to user"""
