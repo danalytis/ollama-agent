@@ -1,4 +1,3 @@
-# working sample version - decent functionality - BEFORE adding shell cmds
 # Ollama AI Agent - Enhanced Edition
 
 A powerful, interactive AI coding assistant with function calling capabilities, system prompt management, model parameter controls, and remote connectivity.
