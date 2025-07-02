@@ -1,4 +1,4 @@
-# Ollama AI Agent - Enhanced Edition
+# Ollama AI Agent
 
 A powerful, interactive AI coding assistant with function calling capabilities, system prompt management, model parameter controls, and remote connectivity.
 
