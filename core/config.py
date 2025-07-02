@@ -18,24 +18,24 @@ class AgentConfig:
     rich_enabled: bool = True
     max_turns: int = 20
     api_base: str = "http://localhost:11434"
-    
+    safe_mode: bool = True
     # Model parameters
     temperature: float = 0.1
     top_p: float = 0.9
     top_k: int = 40
     num_predict: int = 4096
     repeat_penalty: float = 1.1
-    
+
     # System prompt management
     current_prompt: str = "default"
-    
+
     # Directory safety settings
     safe_mode: bool = True
     allowed_base_dirs: List[str] = None
-    
+
     # Shell command safety
     shell_commands_enabled: bool = True  # Can be disabled as kill switch
-    
+
     def __post_init__(self):
         """Initialize default allowed directories"""
         if self.allowed_base_dirs is None:
@@ -65,49 +65,49 @@ class AgentConfig:
             self.typing_speed = speed
             return True
         return False
-    
+
     def set_temperature(self, temp: float) -> bool:
         """Set temperature, returns True if valid"""
         if 0.0 <= temp <= 2.0:
             self.temperature = temp
             return True
         return False
-    
+
     def set_top_p(self, p: float) -> bool:
         """Set top_p, returns True if valid"""
         if 0.0 <= p <= 1.0:
             self.top_p = p
             return True
         return False
-    
+
     def set_top_k(self, k: int) -> bool:
         """Set top_k, returns True if valid"""
         if 1 <= k <= 100:
             self.top_k = k
             return True
         return False
-    
+
     def set_num_predict(self, num: int) -> bool:
         """Set num_predict, returns True if valid"""
         if 1 <= num <= 8192:
             self.num_predict = num
             return True
         return False
-    
+
     def set_repeat_penalty(self, penalty: float) -> bool:
         """Set repeat_penalty, returns True if valid"""
         if 0.5 <= penalty <= 2.0:
             self.repeat_penalty = penalty
             return True
         return False
-    
+
     def set_api_base(self, url: str) -> bool:
         """Set API base URL, returns True if valid"""
         if url.startswith(('http://', 'https://')):
             self.api_base = url.rstrip('/')
             return True
         return False
-    
+
     def get_model_options(self) -> Dict:
         """Get current model options for API calls"""
         return {
@@ -133,10 +133,10 @@ def list_system_prompts() -> Dict[str, str]:
     from core.prompt_manager import PromptManager
     manager = PromptManager()
     prompts = manager.list_available_prompts()
-    
+
     # Convert to old format for compatibility
     descriptions = {}
     for name, info in prompts.items():
         descriptions[name] = info['description']
-    
+
     return descriptions
