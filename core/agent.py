@@ -38,11 +38,11 @@ class OllamaAgent:
     def reset_conversation(self) -> None:
         """Reset conversation with current system prompt"""
         base_prompt, is_from_file = self.prompt_manager.load_prompt(self.config.current_prompt)
-        
+
         if not base_prompt:
             rich_print(f"⚠️  Prompt '{self.config.current_prompt}' not found, using default", style="yellow")
             base_prompt, _ = self.prompt_manager.load_prompt("default")
-        
+
         # Dynamically append shell command instructions if enabled
         if self.config.shell_commands_enabled:
             shell_instructions = """
@@ -51,7 +51,7 @@ SHELL COMMANDS ENABLED:
 You now have access to safe shell commands via the shell_command function. Use these for common file operations:
 
 - Create directories: shell_command with {"command": "mkdir", "args": ["dirname"]}
-- Create empty files: shell_command with {"command": "touch", "args": ["filename"]}  
+- Create empty files: shell_command with {"command": "touch", "args": ["filename"]}
 - List directory contents: shell_command with {"command": "ls", "args": []} or {"command": "ls", "args": ["-la"]}
 - Show current directory: shell_command with {"command": "pwd", "args": []}
 - Print text: shell_command with {"command": "echo", "args": ["text"]}
@@ -68,7 +68,7 @@ Use shell commands as your first choice for file/directory operations, then use 
             system_content = base_prompt + shell_instructions
         else:
             system_content = base_prompt
-            
+
         self.messages = [{"role": "system", "content": system_content}]
 
     def call_ollama_api(self, messages: List[Dict]) -> Dict:
@@ -154,7 +154,7 @@ Use shell commands as your first choice for file/directory operations, then use 
         """Process a single conversation turn"""
         max_function_calls = 5  # Prevent infinite loops
         function_call_count = 0
-        
+
         while function_call_count < max_function_calls:
             try:
                 response = self.call_ollama_api(self.messages)
@@ -342,7 +342,7 @@ Use shell commands as your first choice for file/directory operations, then use 
             # Convert to old format for display compatibility
             prompt_descriptions = {name: info['description'] for name, info in prompts.items()}
             print_prompts_table(prompt_descriptions, self.config.current_prompt, self.config.rich_enabled)
-            
+
             # Show additional info about file-based prompts
             file_prompts = [name for name, info in prompts.items() if 'file' in info['source']]
             if file_prompts:
@@ -390,7 +390,7 @@ Use shell commands as your first choice for file/directory operations, then use 
                 prompt_file = self.prompt_manager.prompts_dir / f"{prompt_name}.md"
                 rich_print(f"📝 Edit prompt file: {prompt_file}", style="blue")
                 rich_print(f"💡 After saving, use /prompt {prompt_name} to switch to it", style="dim")
-                
+
                 # Show current content if exists
                 if prompt_file.exists():
                     rich_print("📄 Current content preview:", style="dim")
@@ -406,7 +406,7 @@ Use shell commands as your first choice for file/directory operations, then use 
             params_data = {
                 "🌡️ Temperature": f"{self.config.temperature} (creativity: 0.0=focused, 2.0=chaotic)",
                 "🎯 Top P": f"{self.config.top_p} (nucleus sampling: 0.1=narrow, 1.0=full)",
-                "🔢 Top K": f"{self.config.top_k} (top-k sampling: 1=strict, 100=diverse)", 
+                "🔢 Top K": f"{self.config.top_k} (top-k sampling: 1=strict, 100=diverse)",
                 "📏 Max Tokens": f"{self.config.num_predict} (response length limit)",
                 "🔄 Repeat Penalty": f"{self.config.repeat_penalty} (0.5=repetitive, 2.0=no repeats)",
             }
@@ -537,7 +537,7 @@ Use shell commands as your first choice for file/directory operations, then use 
             else:
                 force = False
                 target_dir = cmd_parts[1]
-                
+
                 # Check for --force flag
                 if target_dir == "--force" and len(cmd_parts) > 2:
                     force = True
@@ -545,14 +545,14 @@ Use shell commands as your first choice for file/directory operations, then use 
                 elif target_dir.startswith("--force="):
                     force = True
                     target_dir = target_dir[8:]  # Remove --force= prefix
-                
+
                 success, message = safe_change_directory(
-                    target_dir, 
-                    self.config.safe_mode, 
+                    target_dir,
+                    self.config.safe_mode,
                     self.config.allowed_base_dirs,
                     force
                 )
-                
+
                 if success:
                     rich_print(message, style="green")
                     # Update prompt to show new directory if it fits
@@ -641,7 +641,7 @@ Use shell commands as your first choice for file/directory operations, then use 
                 else:
                     rich_print("❌ Invalid option. Use 'on' or 'off'", style="red")
 
-        elif cmd == "dirinfo":
+        elif cmd == "dirinfo" or cmd == "pwd":
             target_dir = cmd_parts[1] if len(cmd_parts) > 1 else "."
             try:
                 rich_print(format_directory_safety_info(target_dir), style="blue")
@@ -727,7 +727,7 @@ Use shell commands as your first choice for file/directory operations, then use 
                         prompt = f"\n[{self.config.model}:{current_dir}]> "
                     else:
                         prompt = f"\n[{self.config.model}]> "
-                    
+
                     user_input = input(prompt).strip()
 
                     if not user_input:
