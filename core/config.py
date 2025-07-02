@@ -33,7 +33,7 @@ class AgentConfig:
     prompt_strength_mode: str = "adaptive" #"adaptive", "fixed", or "none"
     # Context window management
     summarize_old_messages: bool = True # Summarize instead of deleting
-    function_reuslts_max_length: int = 500 # Truncate function results
+    function_result_max_length: int = 500 # Truncate function results
     # System prompt management
     current_prompt: str = "default"
 
