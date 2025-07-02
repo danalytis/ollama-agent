@@ -25,7 +25,15 @@ class AgentConfig:
     top_k: int = 40
     num_predict: int = 4096
     repeat_penalty: float = 1.1
-
+    # Prompt reinforcement settings
+    reinforce_interval: int = 10 # Reinforces every N messages
+    reinforce_enabled: bool = True
+    max_conversation_length: int = 50
+    keep_recent_messages: int = 30
+    prompt_strength_mode: str = "adaptive" #"adaptive", "fixed", or "none"
+    # Context window management
+    summarize_old_messages: bool = True # Summarize instead of deleting
+    function_reuslts_max_length: int = 500 # Truncate function results
     # System prompt management
     current_prompt: str = "default"
 
@@ -35,6 +43,8 @@ class AgentConfig:
 
     # Shell command safety
     shell_commands_enabled: bool = True  # Can be disabled as kill switch
+
+
 
     def __post_init__(self):
         """Initialize default allowed directories"""
@@ -46,6 +56,15 @@ class AgentConfig:
                 "/tmp",                   # Temporary directory
                 "/var/tmp",               # Alternative temp directory
             ]
+
+
+    def should_reinforce(self, message_count: int) -> bool:
+        """Check if we should reinforce the prompt"""
+        if not self.reinforce_enabled:
+            return False
+        # skip system message (index 0) and don't count function results
+        actual_turns = message_count // 2 # a rough estimate
+        return actual_turns > 0 and actual_turns % self.reinforce_interval == 0
 
     def toggle_verbose(self) -> None:
         """Toggle verbose mode"""

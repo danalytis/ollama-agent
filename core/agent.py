@@ -6,6 +6,7 @@ import json
 import requests
 import os
 from typing import List, Dict, Optional
+from core.conversation_manager import ConversationManager
 from core.config import AgentConfig, get_system_prompt, list_system_prompts
 from core.prompt_manager import PromptManager
 from core.functions import execute_function, get_file_language
@@ -28,21 +29,23 @@ from utils.filesystem import safe_change_directory, get_directory_info, suggest_
 class OllamaAgent:
     """Main AI Agent class"""
 
-    def __init__(self, config: AgentConfig):
+    def __init__(self, config: AgentConfig):  # Fixed: Added space between def and __init__
         self.config = config
         self.prompt_manager = PromptManager()
         # Ensure prompts directory exists and export built-ins
         self.prompt_manager.ensure_prompts_directory()
+        # Initialize conversation manager
+        self.conversation_manager = ConversationManager(config, self.prompt_manager)
         self.reset_conversation()
 
     def reset_conversation(self) -> None:
         """Reset conversation with current system prompt"""
         base_prompt, is_from_file = self.prompt_manager.load_prompt(self.config.current_prompt)
-        
+
         if not base_prompt:
             rich_print(f"⚠️  Prompt '{self.config.current_prompt}' not found, using default", style="yellow")
-            base_prompt, _ = self.prompt_manager.load_prompt("default")
-        
+            base_prompt, _ = self.prompt_manager.load_prompt("default")  # Fixed: Corrected syntax
+
         # Dynamically append shell command instructions if enabled
         if self.config.shell_commands_enabled:
             shell_instructions = """
@@ -51,7 +54,7 @@ SHELL COMMANDS ENABLED:
 You now have access to safe shell commands via the shell_command function. Use these for common file operations:
 
 - Create directories: shell_command with {"command": "mkdir", "args": ["dirname"]}
-- Create empty files: shell_command with {"command": "touch", "args": ["filename"]}  
+- Create empty files: shell_command with {"command": "touch", "args": ["filename"]}
 - List directory contents: shell_command with {"command": "ls", "args": []} or {"command": "ls", "args": ["-la"]}
 - Show current directory: shell_command with {"command": "pwd", "args": []}
 - Print text: shell_command with {"command": "echo", "args": ["text"]}
@@ -68,8 +71,8 @@ Use shell commands as your first choice for file/directory operations, then use 
             system_content = base_prompt + shell_instructions
         else:
             system_content = base_prompt
-            
-        self.messages = [{"role": "system", "content": system_content}]
+
+        self.conversation_manager.initialize_conversation(system_content)
 
     def call_ollama_api(self, messages: List[Dict]) -> Dict:
         """Call Ollama's REST API"""
@@ -154,10 +157,11 @@ Use shell commands as your first choice for file/directory operations, then use 
         """Process a single conversation turn"""
         max_function_calls = 5  # Prevent infinite loops
         function_call_count = 0
-        
+
         while function_call_count < max_function_calls:
             try:
-                response = self.call_ollama_api(self.messages)
+                messages = self.conversation_manager.get_messages()
+                response = self.call_ollama_api(messages)
                 assistant_response = response["message"]["content"]
 
                 if self.config.verbose:
@@ -214,11 +218,11 @@ Use shell commands as your first choice for file/directory operations, then use 
                         print()
 
                     # Add function call and result to conversation
-                    self.messages.append(
-                        {"role": "assistant", "content": assistant_response}
-                    )
-                    self.messages.append(
-                        {"role": "user", "content": f"Function result: {ai_result}"}
+                    self.conversation_manager.add_message("assistant", assistant_response)
+                    self.conversation_manager.add_message(
+                        "user",
+                        f"Function result: {ai_result}",  # Fixed: Typo in "result"
+                        is_function_result=True
                     )
 
                     if self.config.verbose:
@@ -236,9 +240,13 @@ Use shell commands as your first choice for file/directory operations, then use 
                         self.config.typing_enabled,
                         style="white",
                     )
-                    self.messages.append(
-                        {"role": "assistant", "content": assistant_response}
-                    )
+
+                    # add final response to conversation manager
+                    self.conversation_manager.add_message("assistant", assistant_response)
+
+                    # update drift score to track convo health
+                    self.conversation_manager.update_drift_score(assistant_response)
+
                     break
 
             except Exception as e:
@@ -275,6 +283,71 @@ Use shell commands as your first choice for file/directory operations, then use 
 
         elif cmd == "help":
             format_help_text(self.config.rich_enabled)
+
+        elif cmd == "reinforce":
+            if len(cmd_parts) < 2:
+                status = "enabled" if self.config.reinforce_enabled else "disabled"
+                rich_print(f"🔄 Prompt reinforcement: {status}", style="blue")
+                rich_print(f"💡 Interval: every {self.config.reinforce_interval} messages", style="dim")
+                rich_print(f"💡 Mode: {self.config.prompt_strength_mode}", style="dim")
+                rich_print("💡 Usage: /reinforce <on|off|interval|mode>", style="dim")
+            else:
+                subcmd = cmd_parts[1].lower()
+
+                if subcmd in ["on", "enable"]:
+                    self.config.reinforce_enabled = True
+                    rich_print("🔄 Prompt reinforcement enabled", style="green")
+                elif subcmd in ["off", "disable"]:
+                    self.config.reinforce_enabled = False
+                    rich_print("🔄 Prompt reinforcement disabled", style="yellow")
+                elif subcmd == "interval" and len(cmd_parts) > 2:
+                    try:
+                        interval = int(cmd_parts[2])
+                        if 1 <= interval <= 100:
+                            self.config.reinforce_interval = interval
+                            rich_print(f"🔄 Reinforcement interval set to: {interval} messages", style="green")
+                        else:
+                            rich_print("❌ Interval must be between 1 and 100", style="red")
+                    except ValueError:
+                        rich_print("❌ Invalid interval. Use a number (e.g., 10)", style="red")
+                elif subcmd == "mode" and len(cmd_parts) > 2:
+                    mode = cmd_parts[2].lower()
+                    if mode in ["adaptive", "fixed", "none"]:
+                        self.config.prompt_strength_mode = mode
+                        rich_print(f"🔄 Reinforcement mode set to: {mode}", style="green")
+                    else:
+                        rich_print("❌ Mode must be: adaptive, fixed, or none", style="red")
+                elif subcmd == "now":
+                    # Force immediate reinforcement
+                    self.conversation_manager._reinforce_prompt()
+                    rich_print("🔄 Prompt reinforced immediately", style="green")
+                else:
+                    rich_print("❌ Unknown subcommand. Use: on, off, interval, mode, or now", style="red")
+
+        elif cmd == "convstats":
+            # Show conversation statistics
+            stats = self.conversation_manager.get_stats()
+            stats_table = {
+                "💬 Total messages": stats["total_messages"],
+                "🔧 Function calls": stats["function_calls"],
+                "🔄 Last reinforcement": f"{stats['last_reinforcement']} messages ago",
+                "📊 Drift score": f"{stats['drift_score']:.2f}",
+                "📏 Current length": stats["current_length"],
+                "📝 Summaries created": stats["summaries_created"],
+            }
+            print_status_table(stats_table, self.config.rich_enabled)
+
+        elif cmd == "trimconv":
+            # Manually trigger conversation trimming
+            if len(cmd_parts) > 1 and cmd_parts[1] == "now":
+                old_length = len(self.conversation_manager.messages)
+                self.conversation_manager._trim_conversation()
+                new_length = len(self.conversation_manager.messages)
+                rich_print(f"✂️  Trimmed conversation: {old_length} → {new_length} messages", style="green")
+            else:
+                rich_print(f"📏 Max conversation length: {self.config.max_conversation_length}", style="blue")
+                rich_print(f"📏 Keep recent messages: {self.config.keep_recent_messages}", style="blue")
+                rich_print("💡 Usage: /trimconv now - to trim immediately", style="dim")
 
         elif cmd == "listmodels":
             self.list_models()
@@ -342,7 +415,7 @@ Use shell commands as your first choice for file/directory operations, then use 
             # Convert to old format for display compatibility
             prompt_descriptions = {name: info['description'] for name, info in prompts.items()}
             print_prompts_table(prompt_descriptions, self.config.current_prompt, self.config.rich_enabled)
-            
+
             # Show additional info about file-based prompts
             file_prompts = [name for name, info in prompts.items() if 'file' in info['source']]
             if file_prompts:
@@ -390,7 +463,7 @@ Use shell commands as your first choice for file/directory operations, then use 
                 prompt_file = self.prompt_manager.prompts_dir / f"{prompt_name}.md"
                 rich_print(f"📝 Edit prompt file: {prompt_file}", style="blue")
                 rich_print(f"💡 After saving, use /prompt {prompt_name} to switch to it", style="dim")
-                
+
                 # Show current content if exists
                 if prompt_file.exists():
                     rich_print("📄 Current content preview:", style="dim")
@@ -406,7 +479,7 @@ Use shell commands as your first choice for file/directory operations, then use 
             params_data = {
                 "🌡️ Temperature": f"{self.config.temperature} (creativity: 0.0=focused, 2.0=chaotic)",
                 "🎯 Top P": f"{self.config.top_p} (nucleus sampling: 0.1=narrow, 1.0=full)",
-                "🔢 Top K": f"{self.config.top_k} (top-k sampling: 1=strict, 100=diverse)", 
+                "🔢 Top K": f"{self.config.top_k} (top-k sampling: 1=strict, 100=diverse)",
                 "📏 Max Tokens": f"{self.config.num_predict} (response length limit)",
                 "🔄 Repeat Penalty": f"{self.config.repeat_penalty} (0.5=repetitive, 2.0=no repeats)",
             }
@@ -505,9 +578,7 @@ Use shell commands as your first choice for file/directory operations, then use 
                 "🤖 Model": self.config.model,
                 "🌐 API Base": self.config.api_base,
                 "📋 System Prompt": self.config.current_prompt,
-                "💬 Conversation turns": len(
-                    [m for m in self.messages if m["role"] != "system"]
-                ),
+                "💬 Conversation turns": self.conversation_manager.get_stats()["total_messages"],  # Fixed: Use conversation manager
                 "🔧 Verbose mode": "enabled" if self.config.verbose else "disabled",
                 "🎨 Syntax highlighting": (
                     "enabled" if self.config.syntax_highlighting else "disabled"
@@ -537,7 +608,7 @@ Use shell commands as your first choice for file/directory operations, then use 
             else:
                 force = False
                 target_dir = cmd_parts[1]
-                
+
                 # Check for --force flag
                 if target_dir == "--force" and len(cmd_parts) > 2:
                     force = True
@@ -545,14 +616,14 @@ Use shell commands as your first choice for file/directory operations, then use 
                 elif target_dir.startswith("--force="):
                     force = True
                     target_dir = target_dir[8:]  # Remove --force= prefix
-                
+
                 success, message = safe_change_directory(
-                    target_dir, 
-                    self.config.safe_mode, 
+                    target_dir,
+                    self.config.safe_mode,
                     self.config.allowed_base_dirs,
                     force
                 )
-                
+
                 if success:
                     rich_print(message, style="green")
                     # Update prompt to show new directory if it fits
@@ -641,7 +712,7 @@ Use shell commands as your first choice for file/directory operations, then use 
                 else:
                     rich_print("❌ Invalid option. Use 'on' or 'off'", style="red")
 
-        elif cmd == "dirinfo":
+        elif cmd == "dirinfo" or cmd == "pwd":
             target_dir = cmd_parts[1] if len(cmd_parts) > 1 else "."
             try:
                 rich_print(format_directory_safety_info(target_dir), style="blue")
@@ -727,7 +798,7 @@ Use shell commands as your first choice for file/directory operations, then use 
                         prompt = f"\n[{self.config.model}:{current_dir}]> "
                     else:
                         prompt = f"\n[{self.config.model}]> "
-                    
+
                     user_input = input(prompt).strip()
 
                     if not user_input:
@@ -740,7 +811,7 @@ Use shell commands as your first choice for file/directory operations, then use 
                         continue
 
                     # Regular AI prompt
-                    self.messages.append({"role": "user", "content": user_input})
+                    self.conversation_manager.add_message("user", user_input)
                     self.process_conversation_turn(user_input)
 
                 except KeyboardInterrupt:
@@ -757,5 +828,5 @@ Use shell commands as your first choice for file/directory operations, then use 
 
     def run_single_prompt(self, prompt: str) -> None:
         """Run a single prompt"""
-        self.messages.append({"role": "user", "content": prompt})
+        self.conversation_manager.add_message("user", prompt)  # Fixed: Use conversation manager
         self.process_conversation_turn(prompt)

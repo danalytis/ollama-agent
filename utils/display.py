@@ -207,6 +207,15 @@ Model & Connection:
   /model <name>       - Switch to a different model
   /connect <url>      - Connect to remote Ollama instance
                         Example: /connect http://192.168.1.100:11434
+Conversation Management:
+  /reinforce          - Control prompt reinforcement settings
+  /reinforce on/off   - Enable/disable reinforcement
+  /reinforce interval <N> - Set reinforcement interval (messages)
+  /reinforce mode <M> - Set mode: adaptive, fixed, or none
+  /reinforce now      - Force immediate reinforcement
+  /convstats          - Show conversation statistics
+  /trimconv           - Show/control conversation trimming
+  /trimconv now       - Manually trim conversation
 
 System Prompts:
   /prompts            - List available system prompts
